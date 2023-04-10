@@ -125,8 +125,8 @@ class NonBatchedDictObservationsWrapper(_DictObservationsWrapper[ListOfDictObser
         obs, info = self.env.reset(**kwargs)
         return [dict(obs=o) for o in obs], info
 
-    def step(self, action: ListActions) -> Tuple[ListOfDictObservations, Any, Any, Any, Any]:
-        obs, rew, terminated, truncated, info = self.env.step(action)
+    def step(self, action: ListActions, values_pred=None) -> Tuple[ListOfDictObservations, Any, Any, Any, Any]:
+        obs, rew, terminated, truncated, info = self.env.step(action, values_pred)
         return [dict(obs=o) for o in obs], rew, terminated, truncated, info
 
 
@@ -364,6 +364,9 @@ class NonBatchedVecEnv(Wrapper[ListObservations, ListActions]):
         self.is_multiagent: bool = is_multiagent
         self.num_agents: int = num_agents
         super().__init__(env)
+
+    def step(self, action: ActType, values_pred=None) -> Tuple[ObsType, float, bool, bool, dict]:
+        return self.env.step(action, values_pred)
 
 
 def make_env_func_non_batched(cfg: Config, env_config, render_mode: Optional[str] = None) -> NonBatchedVecEnv:
