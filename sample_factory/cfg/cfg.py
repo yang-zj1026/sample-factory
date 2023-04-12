@@ -477,7 +477,7 @@ def add_rl_args(p: ArgumentParser):
     p.add_argument(
         "--use_curriculum_learning",
         default=False,
-        type=bool,
+        type=str2bool,
         help="The use of curriculum learning",
     )
 

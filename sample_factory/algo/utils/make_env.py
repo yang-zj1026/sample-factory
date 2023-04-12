@@ -126,7 +126,10 @@ class NonBatchedDictObservationsWrapper(_DictObservationsWrapper[ListOfDictObser
         return [dict(obs=o) for o in obs], info
 
     def step(self, action: ListActions, values_pred=None) -> Tuple[ListOfDictObservations, Any, Any, Any, Any]:
-        obs, rew, terminated, truncated, info = self.env.step(action, values_pred)
+        if values_pred:
+            obs, rew, terminated, truncated, info = self.env.step(action, values_pred)
+        else:
+            obs, rew, terminated, truncated, info = self.env.step(action)
         return [dict(obs=o) for o in obs], rew, terminated, truncated, info
 
 
