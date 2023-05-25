@@ -544,7 +544,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--policy_initialization",
         default="orthogonal",
-        choices=["orthogonal", "xavier_uniform", "torch_default"],
+        choices=["orthogonal", "xavier_uniform", "xavier_normal", "kaiming_uniform", "kaiming_normal", "torch_default"],
         type=str,
         help="NN weight initialization",
     )
