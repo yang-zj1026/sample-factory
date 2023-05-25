@@ -89,6 +89,21 @@ class ActorCritic(nn.Module, Configurable):
                 nn.init.xavier_uniform_(layer.weight.data, gain=gain)
             else:
                 pass
+        elif self.cfg.policy_initialization == "xavier_normal":
+            if type(layer) == nn.Conv2d or type(layer) == nn.Linear:
+                nn.init.xavier_normal_(layer.weight.data, gain=gain)
+            else:
+                pass
+        elif self.cfg.policy_initialization == "kaiming_uniform":
+            if type(layer) == nn.Conv2d or type(layer) == nn.Linear:
+                nn.init.kaiming_uniform_(layer.weight.data, nonlinearity='relu')
+            else:
+                pass
+        elif self.cfg.policy_initialization == "kaiming_normal":
+            if type(layer) == nn.Conv2d or type(layer) == nn.Linear:
+                nn.init.kaiming_normal_(layer.weight.data, nonlinearity='relu')
+            else:
+                pass
         elif self.cfg.policy_initialization == "torch_default":
             # do nothing
             pass
