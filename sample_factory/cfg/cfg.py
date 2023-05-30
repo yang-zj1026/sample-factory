@@ -474,6 +474,12 @@ def add_rl_args(p: ArgumentParser):
         type=int,
         help='Start saving "best" policies after this many env steps to filter lucky episodes that succeed and dominate the statistics early on',
     )
+    p.add_argument(
+        "--use_dormant_neurons",
+        default=False,
+        type=str2bool,
+        help="Whether to use dormant neurons in the policy.",
+    )
 
     # debugging options
     p.add_argument("--benchmark", default=False, type=str2bool, help="Benchmark mode")

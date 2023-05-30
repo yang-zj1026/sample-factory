@@ -175,6 +175,9 @@ class Learner(Configurable):
 
         self.is_initialized = False
 
+        # for dormant neurons
+        self.weight_recycler = None
+
     def init(self) -> InitModelData:
         if self.cfg.exploration_loss_coeff == 0.0:
             self.exploration_loss_func = lambda action_distr, valids, num_invalids: 0.0
@@ -223,7 +226,16 @@ class Learner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        params = list(self.actor_critic.parameters())
+        if self.cfg.use_dormant_neurons:
+            # ToDo: get all layer names of actor encoder
+
+            # get
+
+            # ToDo: initialize weight recycler
+            self.weight_recycler = None
+
+        else:
+            params = list(self.actor_critic.parameters())
 
         optimizer_cls = dict(adam=torch.optim.Adam, lamb=Lamb)
         if self.cfg.optimizer not in optimizer_cls:
@@ -793,6 +805,10 @@ class Learner(Configurable):
                     synchronize(self.cfg, self.device)
                     # this will force policy update on the inference worker (policy worker)
                     self.policy_versions_tensor[self.policy_id] = self.train_step
+
+            # dormant neurons
+            if sel.cfg.use_dormant_neurons:
+                continue
 
             # end of an epoch
             if self.lr_scheduler.invoke_after_each_epoch():
