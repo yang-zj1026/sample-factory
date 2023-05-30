@@ -208,10 +208,10 @@ class ActorCriticSeparateWeights(ActorCritic):
     ):
         super().__init__(obs_space, action_space, cfg)
 
-        self.actor_encoder = model_factory.make_model_encoder_func(cfg, obs_space)
+        self.actor_encoder = model_factory.make_model_encoder_func(cfg, obs_space, "actor_encoder")
         self.actor_core = model_factory.make_model_core_func(cfg, self.actor_encoder.get_out_size())
 
-        self.critic_encoder = model_factory.make_model_encoder_func(cfg, obs_space)
+        self.critic_encoder = model_factory.make_model_encoder_func(cfg, obs_space, "critic_encoder")
         self.critic_core = model_factory.make_model_core_func(cfg, self.critic_encoder.get_out_size())
 
         self.encoders = [self.actor_encoder, self.critic_encoder]
@@ -227,6 +227,9 @@ class ActorCriticSeparateWeights(ActorCritic):
         self.action_parameterization = self.get_action_parameterization(self.critic_decoder.get_out_size())
 
         self.apply(self.initialize_weights)
+
+        self.need_intermediate_results = cfg.use_dormant_neurons
+        self.intermediate_results = {}
 
     def _core_rnn(self, head_output, rnn_states):
         """
@@ -257,6 +260,10 @@ class ActorCriticSeparateWeights(ActorCritic):
         head_outputs = []
         for enc in self.encoders:
             head_outputs.append(enc(normalized_obs_dict))
+
+        if self.need_intermediate_results:
+            for enc in self.encoders:
+                self.intermediate_results.update(enc.intermediate_results)
 
         return torch.cat(head_outputs, dim=1)
 

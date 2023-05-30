@@ -13,6 +13,7 @@ from torch import Tensor
 from torch.nn import Module
 
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
+from sample_factory.algo.learning.weight_recycler import NeuronRecycler
 from sample_factory.algo.utils.action_distributions import get_action_distribution, is_continuous_action_space
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, STATS_KEY, TRAIN_STATS, memory_stats
@@ -227,12 +228,41 @@ class Learner(Configurable):
         self.actor_critic.train()
 
         if self.cfg.use_dormant_neurons:
-            # ToDo: get all layer names of actor encoder
+            # get all layer names of actor encoder
+            param_index_dict = {}
+            params = []
+            for i, layer in enumerate(self.actor_critic.named_parameters()):
+                layer_name, layer_param = layer
+                param_index_dict[layer_name] = i
+                params.append(layer_param)
 
-            # get
+            # Get all layer names (without activation layer)
+            layer_names = []
+            for name, module in self.actor_critic.named_modules():
+                if not isinstance(module, (torch.nn.ReLU, torch.nn.LeakyReLU, torch.nn.Tanh, torch.nn.Sigmoid)):
+                    if name != '':
+                        layer_names.append(name)
 
-            # ToDo: initialize weight recycler
-            self.weight_recycler = None
+            next_layers = {}
+            reset_layers = []
+            for current_layer, next_layer in zip(layer_names[:-1], layer_names[1:]):
+                if '.' not in current_layer:
+                    continue
+                curr_layer_split = current_layer.split('.')
+                next_layer_split = next_layer.split('.')
+                if len(curr_layer_split) == 3 and len(next_layer_split) == 3:
+                    curr_top, next_top = curr_layer_split[1], next_layer_split[1]
+                    if curr_top == next_top and "attention" not in curr_top:
+                        next_layers[current_layer] = next_layer
+                        reset_layers.append(current_layer)
+                        reset_layers.append(next_layer)
+
+            # initialize weight recycler
+            self.weight_recycler = NeuronRecycler(reset_layers, param_index_dict, next_layers,
+                                                  reset_period=200_000_000 // self.cfg.batch_size,
+                                                  reset_start_step=0,
+                                                  reset_end_step=self.cfg.train_for_env_steps // self.cfg.batch_size,
+                                                  logging_period=2_000_000 // self.cfg.batch_size)
 
         else:
             params = list(self.actor_critic.parameters())
@@ -806,9 +836,28 @@ class Learner(Configurable):
                     # this will force policy update on the inference worker (policy worker)
                     self.policy_versions_tensor[self.policy_id] = self.train_step
 
-            # dormant neurons
-            if sel.cfg.use_dormant_neurons:
-                continue
+                # dormant neurons
+                with torch.no_grad(), timing.add_time("dormant_neurons"):
+                    if self.cfg.use_dormant_neurons:
+                        is_intermediated = self.weight_recycler.is_intermediated_required(self.train_step)
+                        intermediates = self.actor_critic.intermediate_results if is_intermediated else None
+                        log_dict_neurons = self.weight_recycler.maybe_log_deadneurons(self.train_step, intermediates)
+                        # update stats_and_summaries with dormant neurons stats
+                        if log_dict_neurons is not None:
+                            if stats_and_summaries is not None:
+                                stats_and_summaries = {**stats_and_summaries, **log_dict_neurons}
+                            else:
+                                stats_and_summaries = log_dict_neurons
+                            log.info("Log dormant neurons stats...")
+
+                        online_params = self.actor_critic.state_dict()
+                        opt_state = self.optimizer.state_dict()
+                        online_params, opt_state, updated = self.weight_recycler.maybe_update_weights(
+                            self.train_step, intermediates, online_params, opt_state)
+                        if updated:
+                            self.actor_critic.load_state_dict(online_params)
+                            self.optimizer.load_state_dict(opt_state)
+                            log.info("Update weights of dormant neurons ...")
 
             # end of an epoch
             if self.lr_scheduler.invoke_after_each_epoch():

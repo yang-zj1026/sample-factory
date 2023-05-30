@@ -74,11 +74,8 @@ class BaseRecycler:
     Base class for weight update methods.
 
     Attributes:
-        all_layers_names: list of layer names in a model.
-        recycle_type: neuron, layer based.
         dead_neurons_threshold: below this threshold a neuron is considered dead.
         reset_layers: list of layer names to be recycled.
-        reset_start_layer_idx: index of the layer from which we start recycling.
         reset_period: int represents the period of weight update.
         reset_start_step: start recycle from start step
         reset_end_step:  end recycle from end step
@@ -88,11 +85,10 @@ class BaseRecycler:
                         for each neuron when we calculate the score.
     """
 
-    def __init__(self, all_layers_names, dead_neurons_threshold=0.0, reset_start_layer_idx=0, reset_period=200_000,
+    def __init__(self, reset_layers, dead_neurons_threshold=0.0, reset_period=200_000,
                  reset_start_step=0, reset_end_step=100_000_000, logging_period=20_000, sub_mean_score=False):
-        self.all_layers_names = all_layers_names
+        self.reset_layers = reset_layers
         self.dead_neurons_threshold = dead_neurons_threshold
-        self.reset_layers = all_layers_names[reset_start_layer_idx:]
         self.reset_period = reset_period
         self.reset_start_step = reset_start_step
         self.reset_end_step = reset_end_step
@@ -101,9 +97,6 @@ class BaseRecycler:
         self.sub_mean_score = sub_mean_score
 
         self._last_update_step = None
-
-    def update_reset_layers(self, reset_start_layer_idx):
-        self.reset_layers = self.all_layers_names[reset_start_layer_idx:]
 
     def is_update_iter(self, step):
         return step > 0 and (step % self.reset_period == 0)
@@ -115,10 +108,12 @@ class BaseRecycler:
         self._last_update_step = update_step
         if self.is_reset(update_step):
             new_params, new_opt_state = self.update_weights(intermediates, params, opt_state)
+            updated = True
         else:
             new_params, new_opt_state = params, opt_state
+            updated = False
 
-        return new_params, new_opt_state
+        return new_params, new_opt_state, updated
 
     def is_reset(self, update_step):
         del update_step
@@ -128,7 +123,7 @@ class BaseRecycler:
         return self.is_logging_step(update_step)
 
     def is_logging_step(self, step):
-        return step % self.logging_period == 0
+        return step % self.logging_period == 0 and step > 0
 
     def maybe_log_deadneurons(self, update_step, intermediates):
         is_logging = self.is_logging_step(update_step)
@@ -206,9 +201,9 @@ class BaseRecycler:
                 total_neurons += layer_size
                 total_deadneurons += deadneurons_count
 
-            log_dict[f'Dormant/total'] = total_neurons
-            log_dict[f'Dormant/deadcount'] = float(total_deadneurons)
-            log_dict[f'Dormant/dormant_percentage'] = (float(total_deadneurons) / total_neurons)
+            log_dict[f'neurons_total'] = total_neurons
+            log_dict[f'neurons_deadcount'] = float(total_deadneurons)
+            log_dict[f'neurons_dormant_percentage'] = (float(total_deadneurons) / total_neurons)
             return log_dict
 
         neuron_score = {k: self.estimate_neuron_score(intermediates[k]) for k in self.reset_layers}
@@ -257,10 +252,13 @@ class NeuronRecycler(BaseRecycler):
         outgoing_scale: scalar for outgoing weights.
     """
 
-    def __init__(self, all_layers_names, reset_layer_names, reset_layer_idx, next_layers, init_method_outgoing='zero',
+    def __init__(self, reset_layer_names, reset_layer_idx_dict, next_layers, init_method_outgoing='zero',
                  weight_scaling=False, incoming_scale=1.0, outgoing_scale=1.0,
-                 reset_period=200_000):
-        super(NeuronRecycler, self).__init__(all_layers_names, reset_period=reset_period)
+                 reset_period=200_000, reset_start_step=0, reset_end_step=100_000_000, logging_period=20_000):
+        super(NeuronRecycler, self).__init__(reset_layer_names, reset_period=reset_period,
+                                             reset_start_step=reset_start_step, reset_end_step=reset_end_step,
+                                             logging_period=logging_period)
+
         self.init_method_outgoing = init_method_outgoing
         self.weight_scaling = weight_scaling
         self.incoming_scale = incoming_scale
@@ -274,7 +272,7 @@ class NeuronRecycler(BaseRecycler):
 
         # recycle the neurons in the given layer.
         self.reset_layers = reset_layer_names
-        self.reset_layers_idx = reset_layer_idx
+        self.reset_layers_idx_dict = reset_layer_idx_dict
 
     def intersected_dead_neurons_with_last_reset(self, intermediates,
                                                  update_step):
@@ -326,7 +324,7 @@ class NeuronRecycler(BaseRecycler):
             params_dict,
         ) = self.create_masks(params_dict, activations_score_dict)
 
-        param_state = opt_state['state']
+        opt_param_state = opt_state['state']
 
         # reset incoming weights, bias and momentum of optimizer
         for reset_layer in self.reset_layers:
@@ -335,22 +333,22 @@ class NeuronRecycler(BaseRecycler):
             incoming_mask = incoming_mask_dict[param_key]
             params_dict[param_key] = weight_reinit_random(param, incoming_mask, weights_type='incoming')
 
-            param_idx = self.reset_layers_idx[param_key]
-            param_state[param_idx]['exp_avg'] = reset_momentum(param_state[param_idx]['exp_avg'],
-                                                               incoming_mask_dict[param_key])
-            param_state[param_idx]['exp_avg_sq'] = reset_momentum(param_state[param_idx]['exp_avg_sq'],
-                                                                  incoming_mask_dict[param_key])
+            param_idx = self.reset_layers_idx_dict[param_key]
+            opt_param_state[param_idx]['exp_avg'] = reset_momentum(opt_param_state[param_idx]['exp_avg'],
+                                                                   incoming_mask_dict[param_key])
+            opt_param_state[param_idx]['exp_avg_sq'] = reset_momentum(opt_param_state[param_idx]['exp_avg_sq'],
+                                                                      incoming_mask_dict[param_key])
 
             bias_key = reset_layer + '.bias'
             bias = params_dict[bias_key]
             incoming_mask = incoming_mask_dict[bias_key]
             params_dict[bias_key] = weight_reinit_zero(bias, incoming_mask)
 
-            bias_idx = self.reset_layers_idx[bias_key]
-            param_state[bias_idx]['exp_avg'] = reset_momentum(param_state[bias_idx]['exp_avg'],
-                                                              incoming_mask_dict[bias_key])
-            param_state[bias_idx]['exp_avg_sq'] = reset_momentum(param_state[bias_idx]['exp_avg_sq'],
-                                                                 incoming_mask_dict[bias_key])
+            bias_idx = self.reset_layers_idx_dict[bias_key]
+            opt_param_state[bias_idx]['exp_avg'] = reset_momentum(opt_param_state[bias_idx]['exp_avg'],
+                                                                  incoming_mask_dict[bias_key])
+            opt_param_state[bias_idx]['exp_avg_sq'] = reset_momentum(opt_param_state[bias_idx]['exp_avg_sq'],
+                                                                     incoming_mask_dict[bias_key])
 
         # reset outgoing weights and momentum of optimizer
         for reset_layer in self.reset_layers:
@@ -367,13 +365,14 @@ class NeuronRecycler(BaseRecycler):
                 else:
                     raise ValueError(f'Invalid init method: {self.init_method_outgoing}')
 
-                next_param_idx = self.reset_layers_idx[next_param_key]
-                param_state[next_param_idx]['exp_avg'] = reset_momentum(param_state[next_param_idx]['exp_avg'],
-                                                                        outgoing_mask_dict[next_param_key])
-                param_state[next_param_idx]['exp_avg_sq'] = reset_momentum(param_state[next_param_idx]['exp_avg_sq'],
-                                                                           outgoing_mask_dict[next_param_key])
+                next_param_idx = self.reset_layers_idx_dict[next_param_key]
+                opt_param_state[next_param_idx]['exp_avg'] = reset_momentum(opt_param_state[next_param_idx]['exp_avg'],
+                                                                            outgoing_mask_dict[next_param_key])
+                opt_param_state[next_param_idx]['exp_avg_sq'] = reset_momentum(
+                    opt_param_state[next_param_idx]['exp_avg_sq'],
+                    outgoing_mask_dict[next_param_key])
 
-        opt_state['state'] = param_state
+        opt_state['state'] = opt_param_state
 
         return params_dict, opt_state
 
