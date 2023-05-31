@@ -85,7 +85,7 @@ class BaseRecycler:
                         for each neuron when we calculate the score.
     """
 
-    def __init__(self, reset_layers, dead_neurons_threshold=0.0, reset_period=200_000,
+    def __init__(self, reset_layers, dead_neurons_threshold=0.0, reset_threshold=0.2, reset_period=200_000,
                  reset_start_step=0, reset_end_step=100_000_000, logging_period=20_000, sub_mean_score=False):
         self.reset_layers = reset_layers
         self.dead_neurons_threshold = dead_neurons_threshold
@@ -98,6 +98,9 @@ class BaseRecycler:
 
         self._last_update_step = None
 
+        self.dormant_rate = 0.0
+        self.reset_threshold = reset_threshold
+
     def is_update_iter(self, step):
         return step > 0 and (step % self.reset_period == 0)
 
@@ -106,6 +109,7 @@ class BaseRecycler:
 
     def maybe_update_weights(self, update_step, intermediates, params, opt_state):
         self._last_update_step = update_step
+        # in case intermediates are None
         if self.is_reset(update_step):
             new_params, new_opt_state = self.update_weights(intermediates, params, opt_state)
             updated = True
@@ -116,8 +120,7 @@ class BaseRecycler:
         return new_params, new_opt_state, updated
 
     def is_reset(self, update_step):
-        del update_step
-        return False
+        return NotImplementedError
 
     def is_intermediated_required(self, update_step):
         return self.is_logging_step(update_step)
@@ -208,6 +211,7 @@ class BaseRecycler:
 
         neuron_score = {k: self.estimate_neuron_score(intermediates[k]) for k in self.reset_layers}
         log_dict_neurons = log_dict(neuron_score)
+        self.dormant_rate = log_dict_neurons['neurons_dormant_percentage']
 
         return log_dict_neurons
 
@@ -253,9 +257,10 @@ class NeuronRecycler(BaseRecycler):
     """
 
     def __init__(self, reset_layer_names, reset_layer_idx_dict, next_layers, init_method_outgoing='zero',
-                 weight_scaling=False, incoming_scale=1.0, outgoing_scale=1.0,
+                 weight_scaling=False, incoming_scale=1.0, outgoing_scale=1.0, reset_threshold=0.3,
                  reset_period=200_000, reset_start_step=0, reset_end_step=100_000_000, logging_period=20_000):
-        super(NeuronRecycler, self).__init__(reset_layer_names, reset_period=reset_period,
+        super(NeuronRecycler, self).__init__(reset_layer_names,
+                                             reset_threshold=reset_threshold, reset_period=reset_period,
                                              reset_start_step=reset_start_step, reset_end_step=reset_end_step,
                                              logging_period=logging_period)
 
@@ -270,7 +275,7 @@ class NeuronRecycler(BaseRecycler):
         self.next_layers = next_layers
         self.next_layers_keys = list(next_layers.keys())
 
-        # recycle the neurons in the given layer.
+        # recycle the neurons in the given layer
         self.reset_layers = reset_layer_names
         self.reset_layers_idx_dict = reset_layer_idx_dict
 
@@ -284,7 +289,8 @@ class NeuronRecycler(BaseRecycler):
 
     def is_reset(self, update_step):
         within_reset_interval = (self.reset_start_step <= update_step < self.reset_end_step)
-        return self.is_update_iter(update_step) and within_reset_interval
+        need_to_reset = self.dormant_rate >= self.reset_threshold
+        return need_to_reset and within_reset_interval
 
     def is_intermediated_required(self, update_step):
         is_logging = self.is_logging_step(update_step)

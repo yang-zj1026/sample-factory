@@ -259,10 +259,10 @@ class Learner(Configurable):
 
             # initialize weight recycler
             self.weight_recycler = NeuronRecycler(reset_layers, param_index_dict, next_layers,
-                                                  reset_period=200_000_000 // self.cfg.batch_size,
-                                                  reset_start_step=0,
+                                                  reset_threshold=self.cfg.neurons_recycling_threshold,
+                                                  reset_period=self.cfg.neurons_recycling_period // self.cfg.batch_size,
                                                   reset_end_step=self.cfg.train_for_env_steps // self.cfg.batch_size,
-                                                  logging_period=2_000_000 // self.cfg.batch_size)
+                                                  logging_period=self.cfg.neurons_logging_period // self.cfg.batch_size)
 
         else:
             params = list(self.actor_critic.parameters())
@@ -850,14 +850,15 @@ class Learner(Configurable):
                                 stats_and_summaries = log_dict_neurons
                             log.info("Log dormant neurons stats...")
 
-                        online_params = self.actor_critic.state_dict()
-                        opt_state = self.optimizer.state_dict()
-                        online_params, opt_state, updated = self.weight_recycler.maybe_update_weights(
-                            self.train_step, intermediates, online_params, opt_state)
-                        if updated:
-                            self.actor_critic.load_state_dict(online_params)
-                            self.optimizer.load_state_dict(opt_state)
-                            log.info("Update weights of dormant neurons ...")
+                            online_params = self.actor_critic.state_dict()
+                            opt_state = self.optimizer.state_dict()
+                            online_params, opt_state, updated = self.weight_recycler.maybe_update_weights(
+                                self.train_step, intermediates, online_params, opt_state)
+
+                            if updated:
+                                self.actor_critic.load_state_dict(online_params)
+                                self.optimizer.load_state_dict(opt_state)
+                                log.info("Update weights of dormant neurons ...")
 
             # end of an epoch
             if self.lr_scheduler.invoke_after_each_epoch():

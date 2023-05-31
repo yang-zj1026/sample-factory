@@ -478,7 +478,31 @@ def add_rl_args(p: ArgumentParser):
         "--use_dormant_neurons",
         default=False,
         type=str2bool,
-        help="Whether to use dormant neurons in the policy.",
+        help="Whether to use dormant neurons in the policy",
+    )
+    p.add_argument(
+        "--neurons_recycling_period",
+        default=200000000,
+        type=int,
+        help="How often to recycle neurons (in env steps)",
+    )
+    p.add_argument(
+        "--dead_neurons_threshold",
+        default=0.,
+        type=float,
+        help="Threshold for determine dead neurons",
+    )
+    p.add_argument(
+        "--neurons_recycling_threshold",
+        default=0.3,
+        type=float,
+        help="Threshold for recycling neurons",
+    )
+    p.add_argument(
+        "--neurons_logging_period",
+        default=1000000,
+        type=int,
+        help="How often to log neurons statistics (in env steps)",
     )
 
     # debugging options
