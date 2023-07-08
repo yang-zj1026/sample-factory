@@ -41,9 +41,9 @@ setup(
         "Videos": "https://sites.google.com/view/sample-factory",
     },
     install_requires=[
-        "numpy>=1.18.1,<2.0",
-        "torch>=1.9,<3.0,!=1.13.0",
-        "gymnasium>=0.27,<1.0",
+        "numpy>=1.18.1, <2.0",
+        "torch>=1.9,<2.0",
+        "gym>=0.26.1,<1.0",
         "pyglet",  # gym dependency
         "tensorboard>=1.15.0",
         "tensorboardx>=2.0",

@@ -631,7 +631,13 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
         for env_i, e in enumerate(self.envs):
             with timing.add_time("env_step"):
                 actions = [s.curr_actions() for s in self.actor_states[env_i]]
-                new_obs, rewards, terminated, truncated, infos = e.step(actions)
+                # TODO: get value prediction here
+                # new_obs, rewards, terminated, truncated, infos = e.step(actions)
+                if self.cfg.use_curriculum_learning:
+                    values_pred = [s.last_value for s in self.actor_states[env_i]]
+                    new_obs, rewards, terminated, truncated, infos = e.step(actions, values_pred)
+                else:
+                    new_obs, rewards, terminated, truncated, infos = e.step(actions)
 
             with timing.add_time("overhead"):
                 stats = self._process_env_step(new_obs, rewards, terminated, truncated, infos, env_i)
